@@ -14,6 +14,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout
@@ -40,6 +42,19 @@ jobs:
             echo "RAILWAY_TOKEN is required"
             exit 1
           fi
+
+          if [[ ${#RAILWAY_TOKEN} -lt 20 ]]; then
+            echo "RAILWAY_TOKEN looks too short; check GitHub secret value"
+            exit 1
+          fi
+
+          if ! railway whoami > /tmp/railway-whoami.txt 2>&1; then
+            echo "Railway auth failed with provided token"
+            cat /tmp/railway-whoami.txt
+            exit 1
+          fi
+
+          cat /tmp/railway-whoami.txt
 
           ARGS=(--ci)
 
