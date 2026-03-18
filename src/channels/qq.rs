@@ -60,10 +60,10 @@ impl QqChannel {
     async fn get_app_access_token(&self) -> Result<String> {
         {
             let guard = self.token_cache.lock().await;
-            if let Some(cached) = &*guard
-                && cached.expires_at > Instant::now() + Duration::from_secs(60)
-            {
-                return Ok(cached.token.clone());
+            if let Some(cached) = &*guard {
+                if cached.expires_at > Instant::now() + Duration::from_secs(60) {
+                    return Ok(cached.token.clone());
+                }
             }
         }
 
@@ -261,10 +261,10 @@ async fn run_gateway_once(
                             seq = Some(s);
                         }
 
-                        if gateway.op == 0
-                            && let Some(event) = parse_dispatch_event(&gateway)
-                        {
-                            let _ = events.send(event);
+                        if gateway.op == 0 {
+                            if let Some(event) = parse_dispatch_event(&gateway) {
+                                let _ = events.send(event);
+                            }
                         }
                     }
                     Message::Ping(data) => {
@@ -293,10 +293,10 @@ fn frame_to_text(frame: Message) -> Result<String> {
 }
 
 async fn resolve_gateway_ws_url(cfg: &QqChannelConfig) -> Result<String> {
-    if let Some(url) = &cfg.gateway_url
-        && !url.is_empty()
-    {
-        return Ok(url.clone());
+    if let Some(url) = &cfg.gateway_url {
+        if !url.is_empty() {
+            return Ok(url.clone());
+        }
     }
 
     let endpoint = format!("{}/gateway/bot", cfg.api_base.trim_end_matches('/'));
@@ -479,15 +479,15 @@ fn parse_qq_target(input: &str) -> Option<QqTarget> {
     let private_prefix = "qq:private:";
     let group_prefix = "qq:group:";
 
-    if let Some(id) = input.strip_prefix(private_prefix)
-        && !id.is_empty()
-    {
-        return Some(QqTarget::Private(id.to_string()));
+    if let Some(id) = input.strip_prefix(private_prefix) {
+        if !id.is_empty() {
+            return Some(QqTarget::Private(id.to_string()));
+        }
     }
-    if let Some(id) = input.strip_prefix(group_prefix)
-        && !id.is_empty()
-    {
-        return Some(QqTarget::Group(id.to_string()));
+    if let Some(id) = input.strip_prefix(group_prefix) {
+        if !id.is_empty() {
+            return Some(QqTarget::Group(id.to_string()));
+        }
     }
     None
 }
