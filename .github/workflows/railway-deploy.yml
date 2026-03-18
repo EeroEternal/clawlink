@@ -48,14 +48,6 @@ jobs:
             exit 1
           fi
 
-          if ! railway whoami > /tmp/railway-whoami.txt 2>&1; then
-            echo "Railway auth failed with provided token"
-            cat /tmp/railway-whoami.txt
-            exit 1
-          fi
-
-          cat /tmp/railway-whoami.txt
-
           ARGS=(--ci)
 
           if [[ -n "${RAILWAY_PROJECT_ID:-}" ]]; then
