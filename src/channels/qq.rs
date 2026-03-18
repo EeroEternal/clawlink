@@ -33,6 +33,7 @@ struct CachedAccessToken {
 struct GatewayAuthToken {
     header: String,
     identify_token: String,
+    gateway_path: &'static str,
 }
 
 impl QqChannel {
@@ -183,7 +184,8 @@ async fn run_gateway_once(
     events: &broadcast::Sender<ServerMessage>,
 ) -> Result<()> {
     let gateway_auth = resolve_gateway_auth_token(cfg).await?;
-    let ws_url = resolve_gateway_ws_url(cfg, &gateway_auth.header).await?;
+    let ws_url =
+        resolve_gateway_ws_url(cfg, &gateway_auth.header, gateway_auth.gateway_path).await?;
     info!(ws_url = %ws_url, "connecting to qq gateway ws");
 
     let (socket, _) = tokio_tungstenite::connect_async(&ws_url)
@@ -330,6 +332,7 @@ async fn resolve_gateway_auth_token(cfg: &QqChannelConfig) -> Result<GatewayAuth
         return Ok(GatewayAuthToken {
             header: token.clone(),
             identify_token: token,
+            gateway_path: "/gateway/bot",
         });
     }
 
@@ -365,19 +368,22 @@ async fn resolve_gateway_auth_token(cfg: &QqChannelConfig) -> Result<GatewayAuth
     })?;
 
     Ok(GatewayAuthToken {
-        header: format!("Bearer {}", payload.access_token),
-        identify_token: format!("QQBot {}.{}", cfg.app_id, payload.access_token),
+        // Match official qqbot plugin behavior: use QQBot <access_token> for both
+        // gateway query and websocket identify.
+        header: format!("QQBot {}", payload.access_token),
+        identify_token: format!("QQBot {}", payload.access_token),
+        gateway_path: "/gateway",
     })
 }
 
-async fn resolve_gateway_ws_url(cfg: &QqChannelConfig, auth: &str) -> Result<String> {
+async fn resolve_gateway_ws_url(cfg: &QqChannelConfig, auth: &str, gateway_path: &str) -> Result<String> {
     if let Some(url) = &cfg.gateway_url {
         if !url.is_empty() {
             return Ok(url.clone());
         }
     }
 
-    let endpoint = format!("{}/gateway/bot", cfg.api_base.trim_end_matches('/'));
+    let endpoint = format!("{}{}", cfg.api_base.trim_end_matches('/'), gateway_path);
     let client = reqwest::Client::new();
     let rsp = client
         .get(endpoint)
