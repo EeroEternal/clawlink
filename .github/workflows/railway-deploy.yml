@@ -31,6 +31,7 @@ jobs:
 
       - name: Deploy
         env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
           RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
@@ -38,14 +39,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -z "${RAILWAY_TOKEN:-}" ]]; then
-            echo "RAILWAY_TOKEN is required"
+          EFFECTIVE_TOKEN="${RAILWAY_API_TOKEN:-${RAILWAY_TOKEN:-}}"
+
+          if [[ -z "${EFFECTIVE_TOKEN}" ]]; then
+            echo "RAILWAY_API_TOKEN or RAILWAY_TOKEN is required"
             exit 1
           fi
 
-          if [[ ${#RAILWAY_TOKEN} -lt 20 ]]; then
-            echo "RAILWAY_TOKEN looks too short; check GitHub secret value"
+          if [[ ${#EFFECTIVE_TOKEN} -lt 20 ]]; then
+            echo "Railway token looks too short; check GitHub secret value"
             exit 1
+          fi
+
+          export RAILWAY_API_TOKEN="${RAILWAY_API_TOKEN:-}"
+          if [[ -z "${RAILWAY_API_TOKEN}" ]]; then
+            export RAILWAY_TOKEN="${RAILWAY_TOKEN:-}"
           fi
 
           ARGS=(--ci)
