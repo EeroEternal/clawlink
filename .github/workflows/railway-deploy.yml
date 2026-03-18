@@ -32,14 +32,14 @@ jobs:
       - name: Deploy
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
           RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
           RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_ENVIRONMENT_ID }}
         run: |
           set -euo pipefail
 
-          EFFECTIVE_TOKEN="${RAILWAY_API_TOKEN:-${RAILWAY_TOKEN:-}}"
+          EFFECTIVE_TOKEN="${RAILWAY_API_TOKEN:-${RAILWAY_PROJECT_TOKEN:-}}"
 
           if [[ -z "${EFFECTIVE_TOKEN}" ]]; then
             echo "RAILWAY_API_TOKEN or RAILWAY_TOKEN is required"
@@ -51,9 +51,12 @@ jobs:
             exit 1
           fi
 
-          export RAILWAY_API_TOKEN="${RAILWAY_API_TOKEN:-}"
-          if [[ -z "${RAILWAY_API_TOKEN}" ]]; then
-            export RAILWAY_TOKEN="${RAILWAY_TOKEN:-}"
+          if [[ -n "${RAILWAY_API_TOKEN:-}" ]]; then
+            unset RAILWAY_TOKEN || true
+            export RAILWAY_API_TOKEN
+          else
+            unset RAILWAY_API_TOKEN || true
+            export RAILWAY_TOKEN="${RAILWAY_PROJECT_TOKEN:-}"
           fi
 
           ARGS=(--ci)
