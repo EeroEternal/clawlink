@@ -160,6 +160,23 @@ The integration test `tests/echo_ws.rs` validates:
 - macOS launchd plist: `deploy/launchd/com.clawlink.gateway.plist`
 - Tailscale hardening notes: `deploy/tailscale.md`
 
+### GitHub Actions -> Railway
+
+This repository includes a deploy workflow at `.github/workflows/railway-deploy.yml`.
+
+It runs on:
+- push to `main`
+- manual trigger (`workflow_dispatch`)
+
+Required GitHub secrets:
+
+- `RAILWAY_TOKEN` (required)
+- `RAILWAY_PROJECT_ID` (optional, recommended)
+- `RAILWAY_SERVICE_ID` (optional, recommended)
+- `RAILWAY_ENVIRONMENT_ID` (optional)
+
+If you provide project/service/environment IDs, the workflow deploys to that exact Railway target.
+
 ## Next Milestones
 
 1. Implement real official API clients for DingTalk and Feishu first.

@@ -1,0 +1,56 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: railway-deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+          RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_ENVIRONMENT_ID }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${RAILWAY_TOKEN:-}" ]]; then
+            echo "RAILWAY_TOKEN is required"
+            exit 1
+          fi
+
+          ARGS=(--ci)
+
+          if [[ -n "${RAILWAY_PROJECT_ID:-}" ]]; then
+            ARGS+=(--project "${RAILWAY_PROJECT_ID}")
+          fi
+          if [[ -n "${RAILWAY_SERVICE_ID:-}" ]]; then
+            ARGS+=(--service "${RAILWAY_SERVICE_ID}")
+          fi
+          if [[ -n "${RAILWAY_ENVIRONMENT_ID:-}" ]]; then
+            ARGS+=(--environment "${RAILWAY_ENVIRONMENT_ID}")
+          fi
+
+          railway up "${ARGS[@]}"
