@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::broadcast;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
 
@@ -274,8 +275,32 @@ async fn run_gateway_once(
                             .await
                             .map_err(|e| ClawError::Channel(format!("qq ws pong send failed: {e}")))?;
                     }
-                    Message::Close(_) => {
-                        return Err(ClawError::Channel("qq ws closed".to_string()));
+                    Message::Close(close) => {
+                        if let Some(close) = close {
+                            let code = match close.code {
+                                CloseCode::Normal => 1000,
+                                CloseCode::Away => 1001,
+                                CloseCode::Protocol => 1002,
+                                CloseCode::Unsupported => 1003,
+                                CloseCode::Status => 1005,
+                                CloseCode::Abnormal => 1006,
+                                CloseCode::Invalid => 1007,
+                                CloseCode::Policy => 1008,
+                                CloseCode::Size => 1009,
+                                CloseCode::Extension => 1010,
+                                CloseCode::Error => 1011,
+                                CloseCode::Restart => 1012,
+                                CloseCode::Again => 1013,
+                                CloseCode::Tls => 1015,
+                                CloseCode::Reserved(v) | CloseCode::Iana(v) | CloseCode::Library(v) => v,
+                                _ => 4000,
+                            };
+                            return Err(ClawError::Channel(format!(
+                                "qq ws closed: code={code}, reason={}",
+                                close.reason
+                            )));
+                        }
+                        return Err(ClawError::Channel("qq ws closed without frame".to_string()));
                     }
                     Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
                 }
