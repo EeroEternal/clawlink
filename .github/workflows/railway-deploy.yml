@@ -36,8 +36,11 @@ jobs:
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
           RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
           RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_ENVIRONMENT_ID }}
+          GITHUB_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+
+          echo "Deploying commit: ${GITHUB_SHA}"
 
           EFFECTIVE_TOKEN="${RAILWAY_API_TOKEN:-${RAILWAY_PROJECT_TOKEN:-}}"
 
@@ -71,4 +74,4 @@ jobs:
             ARGS+=(--environment "${RAILWAY_ENVIRONMENT_ID}")
           fi
 
-          railway up "${ARGS[@]}"
+          railway up "${ARGS[@]}" --message "github:${GITHUB_SHA}"
