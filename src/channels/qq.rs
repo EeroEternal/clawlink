@@ -29,6 +29,12 @@ struct CachedAccessToken {
     expires_at: Instant,
 }
 
+#[derive(Debug, Clone)]
+struct GatewayAuthToken {
+    header: String,
+    identify_token: String,
+}
+
 impl QqChannel {
     pub fn new(cfg: QqChannelConfig) -> Self {
         Self {
@@ -177,7 +183,7 @@ async fn run_gateway_once(
     events: &broadcast::Sender<ServerMessage>,
 ) -> Result<()> {
     let gateway_auth = resolve_gateway_auth_token(cfg).await?;
-    let ws_url = resolve_gateway_ws_url(cfg, &gateway_auth).await?;
+    let ws_url = resolve_gateway_ws_url(cfg, &gateway_auth.header).await?;
     info!(ws_url = %ws_url, "connecting to qq gateway ws");
 
     let (socket, _) = tokio_tungstenite::connect_async(&ws_url)
@@ -213,7 +219,7 @@ async fn run_gateway_once(
     let identify = serde_json::json!({
         "op": 2,
         "d": {
-            "token": gateway_auth,
+            "token": gateway_auth.identify_token,
             "intents": cfg.ws_intents,
             "shard": [0, 1],
             "properties": {
@@ -318,9 +324,13 @@ fn frame_to_text(frame: Message) -> Result<String> {
     }
 }
 
-async fn resolve_gateway_auth_token(cfg: &QqChannelConfig) -> Result<String> {
+async fn resolve_gateway_auth_token(cfg: &QqChannelConfig) -> Result<GatewayAuthToken> {
     if !cfg.bot_token.is_empty() {
-        return Ok(format!("QQBot {}.{}", cfg.app_id, cfg.bot_token));
+        let token = format!("QQBot {}.{}", cfg.app_id, cfg.bot_token);
+        return Ok(GatewayAuthToken {
+            header: token.clone(),
+            identify_token: token,
+        });
     }
 
     if cfg.app_id.is_empty() || cfg.app_secret.is_empty() {
@@ -354,7 +364,10 @@ async fn resolve_gateway_auth_token(cfg: &QqChannelConfig) -> Result<String> {
         ClawError::Channel(format!("qq access token response decode failed: {e}"))
     })?;
 
-    Ok(format!("Bearer {}", payload.access_token))
+    Ok(GatewayAuthToken {
+        header: format!("Bearer {}", payload.access_token),
+        identify_token: format!("QQBot {}.{}", cfg.app_id, payload.access_token),
+    })
 }
 
 async fn resolve_gateway_ws_url(cfg: &QqChannelConfig, auth: &str) -> Result<String> {
