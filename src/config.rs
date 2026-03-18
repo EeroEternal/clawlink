@@ -279,8 +279,9 @@ fn default_qq_api_base() -> String {
 }
 
 fn default_qq_ws_intents() -> u64 {
-    // GROUP_AND_C2C_EVENT
-    1 << 30
+    // Match openclaw-qqbot FULL_INTENTS:
+    // PUBLIC_GUILD_MESSAGES | DIRECT_MESSAGE | GROUP_AND_C2C
+    (1 << 30) | (1 << 12) | (1 << 25)
 }
 
 fn default_qq_reconnect_seconds() -> u64 {

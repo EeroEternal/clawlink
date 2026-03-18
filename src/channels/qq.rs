@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::broadcast;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::{HeaderValue, header::USER_AGENT};
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
@@ -188,7 +190,15 @@ async fn run_gateway_once(
         resolve_gateway_ws_url(cfg, &gateway_auth.header, gateway_auth.gateway_path).await?;
     info!(ws_url = %ws_url, "connecting to qq gateway ws");
 
-    let (socket, _) = tokio_tungstenite::connect_async(&ws_url)
+    let mut request = ws_url
+        .as_str()
+        .into_client_request()
+        .map_err(|e| ClawError::Channel(format!("qq ws request build failed: {e}")))?;
+    request
+        .headers_mut()
+        .insert(USER_AGENT, HeaderValue::from_static("clawlink/0.1"));
+
+    let (socket, _) = tokio_tungstenite::connect_async(request)
         .await
         .map_err(|e| ClawError::Channel(format!("qq ws connect failed: {e}")))?;
 
