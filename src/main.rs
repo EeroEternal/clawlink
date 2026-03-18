@@ -21,6 +21,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    init_rustls_provider();
     let config = Arc::new(AppConfig::load(&cli.config)?);
 
     init_logging(&config.logging.level);
@@ -35,6 +36,10 @@ async fn main() -> Result<()> {
     let state = AppState::new(config, channels);
     start_background_tasks(&state.config, &state.events);
     run(state).await
+}
+
+fn init_rustls_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 fn init_logging(level: &str) {
