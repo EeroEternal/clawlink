@@ -23,6 +23,7 @@ async fn e2e_webhook_echo_to_operator() {
             tls_cert_path: String::new(),
             tls_key_path: String::new(),
             device_public_keys: Default::default(),
+            allow_public_bind: true,
         },
         security: SecurityConfig {
             rate_limit_per_sec: 50,

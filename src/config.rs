@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, net::IpAddr, path::Path};
+use std::{collections::HashMap, env, fs, io::ErrorKind, net::IpAddr, path::Path};
 
 use serde::Deserialize;
 
@@ -17,10 +17,89 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load(path: &Path) -> Result<Self> {
-        let raw = fs::read_to_string(path)?;
-        let cfg: Self = toml::from_str(&raw)?;
+        let cfg = match fs::read_to_string(path) {
+            Ok(raw) => toml::from_str(&raw)?,
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                tracing::warn!(
+                    config_path = %path.display(),
+                    "config file not found, falling back to environment variables"
+                );
+                Self::from_env()?
+            }
+            Err(e) => return Err(e.into()),
+        };
+
         cfg.validate()?;
         Ok(cfg)
+    }
+
+    pub fn from_env() -> Result<Self> {
+        let token = env::var("CLAWLINK_GATEWAY_TOKEN").map_err(|_| {
+            ClawError::InvalidConfig(
+                "CLAWLINK_GATEWAY_TOKEN is required when config.toml is missing".to_string(),
+            )
+        })?;
+
+        let port = env::var("PORT").unwrap_or_else(|_| "9443".to_string());
+        let bind = env::var("CLAWLINK_GATEWAY_BIND").unwrap_or_else(|_| format!("0.0.0.0:{port}"));
+
+        let require_wss = env_bool("CLAWLINK_GATEWAY_REQUIRE_WSS", false);
+        let allow_public_bind = env_bool("CLAWLINK_ALLOW_PUBLIC_BIND", true);
+        let logging_level = env::var("CLAWLINK_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
+
+        let qq_enabled = env_bool("CLAWLINK_CHANNEL_QQ_ENABLED", false);
+        let qq_cfg = QqChannelConfig {
+            enabled: qq_enabled,
+            app_id: env::var("CLAWLINK_QQ_APP_ID").unwrap_or_default(),
+            app_secret: env::var("CLAWLINK_QQ_APP_SECRET").unwrap_or_default(),
+            bot_token: env::var("CLAWLINK_QQ_BOT_TOKEN").unwrap_or_default(),
+            auth_url: env::var("CLAWLINK_QQ_AUTH_URL").unwrap_or_else(|_| default_qq_auth_url()),
+            api_base: env::var("CLAWLINK_QQ_API_BASE").unwrap_or_else(|_| default_qq_api_base()),
+            gateway_url: env::var("CLAWLINK_QQ_GATEWAY_URL").ok(),
+            ws_enabled: env_bool("CLAWLINK_QQ_WS_ENABLED", true),
+            ws_intents: env_u64("CLAWLINK_QQ_WS_INTENTS", default_qq_ws_intents()),
+            ws_reconnect_seconds: env_u64(
+                "CLAWLINK_QQ_WS_RECONNECT_SECONDS",
+                default_qq_reconnect_seconds(),
+            ),
+            endpoint: env::var("CLAWLINK_QQ_ENDPOINT").ok(),
+        };
+
+        Ok(Self {
+            gateway: GatewayConfig {
+                bind,
+                token,
+                require_wss,
+                tls_cert_path: env::var("CLAWLINK_TLS_CERT_PATH").unwrap_or_default(),
+                tls_key_path: env::var("CLAWLINK_TLS_KEY_PATH").unwrap_or_default(),
+                allow_public_bind,
+                device_public_keys: HashMap::new(),
+            },
+            security: SecurityConfig {
+                rate_limit_per_sec: env_u32("CLAWLINK_RATE_LIMIT_PER_SEC", default_rate_limit()),
+                max_message_bytes: env_usize("CLAWLINK_MAX_MESSAGE_BYTES", default_max_message()),
+                max_json_depth: env_usize("CLAWLINK_MAX_JSON_DEPTH", default_max_depth()),
+                require_ed25519: env_bool("CLAWLINK_REQUIRE_ED25519", false),
+            },
+            channels: ChannelsConfig {
+                qq: qq_cfg,
+                wecom: ChannelToggleConfig {
+                    enabled: env_bool("CLAWLINK_CHANNEL_WECOM_ENABLED", false),
+                    endpoint: env::var("CLAWLINK_WECOM_ENDPOINT").ok(),
+                },
+                dingtalk: ChannelToggleConfig {
+                    enabled: env_bool("CLAWLINK_CHANNEL_DINGTALK_ENABLED", false),
+                    endpoint: env::var("CLAWLINK_DINGTALK_ENDPOINT").ok(),
+                },
+                feishu: ChannelToggleConfig {
+                    enabled: env_bool("CLAWLINK_CHANNEL_FEISHU_ENABLED", false),
+                    endpoint: env::var("CLAWLINK_FEISHU_ENDPOINT").ok(),
+                },
+            },
+            logging: LoggingConfig {
+                level: logging_level,
+            },
+        })
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -36,7 +115,7 @@ impl AppConfig {
             .parse::<std::net::SocketAddr>()
             .map_err(|e| ClawError::InvalidConfig(format!("invalid gateway.bind address: {e}")))?;
 
-        if !is_local_or_tailscale(addr.ip()) {
+        if !self.gateway.allow_public_bind && !is_local_or_tailscale(addr.ip()) {
             return Err(ClawError::InvalidConfig(
                 "gateway.bind must be loopback or tailscale range".to_string(),
             ));
@@ -90,6 +169,8 @@ pub struct GatewayConfig {
     pub tls_cert_path: String,
     #[serde(default)]
     pub tls_key_path: String,
+    #[serde(default)]
+    pub allow_public_bind: bool,
     #[serde(default)]
     pub device_public_keys: HashMap<String, String>,
 }
@@ -234,4 +315,32 @@ fn default_log_level() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+fn env_bool(name: &str, default: bool) -> bool {
+    match env::var(name) {
+        Ok(v) => matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
+        Err(_) => default,
+    }
+}
+
+fn env_u32(name: &str, default: u32) -> u32 {
+    env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(default)
+}
+
+fn env_u64(name: &str, default: u64) -> u64 {
+    env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn env_usize(name: &str, default: usize) -> usize {
+    env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default)
 }

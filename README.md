@@ -177,6 +177,26 @@ Required GitHub secrets:
 
 If you provide project/service/environment IDs, the workflow deploys to that exact Railway target.
 
+### Railway Runtime Notes
+
+When `config.toml` is missing (typical on Railway), ClawLink now falls back to environment variables.
+
+Minimum required variable:
+
+- `CLAWLINK_GATEWAY_TOKEN` (64+ chars)
+
+Recommended Railway variables:
+
+- `CLAWLINK_GATEWAY_BIND=0.0.0.0:${{PORT}}` (or omit, it defaults to `0.0.0.0:$PORT`)
+- `CLAWLINK_GATEWAY_REQUIRE_WSS=false` (Railway edge TLS terminates upstream)
+- `CLAWLINK_ALLOW_PUBLIC_BIND=true`
+
+QQ channel variables (if enabling QQ):
+
+- `CLAWLINK_CHANNEL_QQ_ENABLED=true`
+- `CLAWLINK_QQ_APP_ID=...`
+- `CLAWLINK_QQ_BOT_TOKEN=...`
+
 ## Next Milestones
 
 1. Implement real official API clients for DingTalk and Feishu first.
