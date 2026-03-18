@@ -1,0 +1,23 @@
+[Unit]
+Description=ClawLink Secure IM Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=clawlink
+Group=clawlink
+WorkingDirectory=/opt/clawlink
+Environment=RUST_LOG=info
+ExecStart=/opt/clawlink/clawlink --config /etc/clawlink/config.toml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/clawlink
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

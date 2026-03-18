@@ -1,0 +1,51 @@
+# ClawLink config (MVP)
+# Keep token in environment-injected secrets manager for production.
+
+[gateway]
+bind = "127.0.0.1:9443"
+# 64+ chars random token.
+token = "REPLACE_WITH_A_RANDOM_TOKEN_AT_LEAST_64_CHARS_LONG________________"
+require_wss = true
+tls_cert_path = "./certs/clawlink-cert.pem"
+tls_key_path = "./certs/clawlink-key.pem"
+
+# Optional: device_id => Ed25519 public key (base64)
+[gateway.device_public_keys]
+# "agent-device-1" = "BASE64_ED25519_PUBLIC_KEY"
+
+[security]
+rate_limit_per_sec = 20
+max_message_bytes = 1048576
+max_json_depth = 64
+require_ed25519 = false
+
+[channels.qq]
+enabled = false
+# Official QQ bot credentials.
+app_id = ""
+app_secret = ""
+bot_token = ""
+auth_url = "https://bots.qq.com/app/getAppAccessToken"
+api_base = "https://api.sgroup.qq.com"
+# Optional override. Leave empty to auto-discover from /gateway/bot.
+# gateway_url = "wss://api.sgroup.qq.com/websocket"
+ws_enabled = true
+# GROUP_AND_C2C_EVENT
+ws_intents = 1073741824
+ws_reconnect_seconds = 3
+endpoint = ""
+
+[channels.wecom]
+enabled = false
+endpoint = ""
+
+[channels.dingtalk]
+enabled = true
+endpoint = "https://oapi.dingtalk.com/robot/send?access_token=xxxx"
+
+[channels.feishu]
+enabled = true
+endpoint = "https://open.feishu.cn/open-apis/bot/v2/hook/xxxx"
+
+[logging]
+level = "info"
