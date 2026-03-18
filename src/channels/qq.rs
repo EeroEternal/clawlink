@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
@@ -488,7 +488,26 @@ struct AccessTokenRequest {
 #[derive(Debug, Deserialize)]
 struct AccessTokenResponse {
     access_token: String,
+    #[serde(deserialize_with = "deserialize_u64_from_number_or_string")]
     expires_in: u64,
+}
+
+fn deserialize_u64_from_number_or_string<'de, D>(deserializer: D) -> std::result::Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .ok_or_else(|| serde::de::Error::custom("invalid numeric expires_in")),
+        serde_json::Value::String(s) => s
+            .parse::<u64>()
+            .map_err(|_| serde::de::Error::custom("invalid string expires_in")),
+        _ => Err(serde::de::Error::custom(
+            "expires_in must be a number or string",
+        )),
+    }
 }
 
 #[derive(Debug, Deserialize)]
