@@ -156,8 +156,8 @@ pub fn spawn_qq_gateway_task(
         return None;
     }
 
-    if cfg.app_id.is_empty() || cfg.bot_token.is_empty() {
-        warn!("qq ws gateway is enabled but app_id/bot_token is missing; skip qq ws task");
+    if cfg.app_id.is_empty() || (cfg.bot_token.is_empty() && cfg.app_secret.is_empty()) {
+        warn!("qq ws gateway is enabled but credentials are missing; require app_id + (bot_token or app_secret)");
         return None;
     }
 
@@ -175,7 +175,8 @@ async fn run_gateway_once(
     cfg: &QqChannelConfig,
     events: &broadcast::Sender<ServerMessage>,
 ) -> Result<()> {
-    let ws_url = resolve_gateway_ws_url(cfg).await?;
+    let gateway_auth = resolve_gateway_auth_token(cfg).await?;
+    let ws_url = resolve_gateway_ws_url(cfg, &gateway_auth).await?;
     info!(ws_url = %ws_url, "connecting to qq gateway ws");
 
     let (socket, _) = tokio_tungstenite::connect_async(&ws_url)
@@ -211,7 +212,7 @@ async fn run_gateway_once(
     let identify = serde_json::json!({
         "op": 2,
         "d": {
-            "token": format!("QQBot {}.{}", cfg.app_id, cfg.bot_token),
+            "token": gateway_auth,
             "intents": cfg.ws_intents,
             "shard": [0, 1],
             "properties": {
@@ -292,7 +293,46 @@ fn frame_to_text(frame: Message) -> Result<String> {
     }
 }
 
-async fn resolve_gateway_ws_url(cfg: &QqChannelConfig) -> Result<String> {
+async fn resolve_gateway_auth_token(cfg: &QqChannelConfig) -> Result<String> {
+    if !cfg.bot_token.is_empty() {
+        return Ok(format!("QQBot {}.{}", cfg.app_id, cfg.bot_token));
+    }
+
+    if cfg.app_id.is_empty() || cfg.app_secret.is_empty() {
+        return Err(ClawError::InvalidConfig(
+            "qq ws requires app_id + (bot_token or app_secret)".to_string(),
+        ));
+    }
+
+    let req = AccessTokenRequest {
+        app_id: cfg.app_id.clone(),
+        client_secret: cfg.app_secret.clone(),
+    };
+
+    let client = reqwest::Client::new();
+    let rsp = client
+        .post(&cfg.auth_url)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| ClawError::Channel(format!("qq access token request failed: {e}")))?;
+
+    if !rsp.status().is_success() {
+        let status = rsp.status();
+        let body = rsp.text().await.unwrap_or_default();
+        return Err(ClawError::Channel(format!(
+            "qq access token request failed with status {status}: {body}"
+        )));
+    }
+
+    let payload: AccessTokenResponse = rsp.json().await.map_err(|e| {
+        ClawError::Channel(format!("qq access token response decode failed: {e}"))
+    })?;
+
+    Ok(format!("Bearer {}", payload.access_token))
+}
+
+async fn resolve_gateway_ws_url(cfg: &QqChannelConfig, auth: &str) -> Result<String> {
     if let Some(url) = &cfg.gateway_url {
         if !url.is_empty() {
             return Ok(url.clone());
@@ -300,8 +340,6 @@ async fn resolve_gateway_ws_url(cfg: &QqChannelConfig) -> Result<String> {
     }
 
     let endpoint = format!("{}/gateway/bot", cfg.api_base.trim_end_matches('/'));
-    let auth = format!("QQBot {}.{}", cfg.app_id, cfg.bot_token);
-
     let client = reqwest::Client::new();
     let rsp = client
         .get(endpoint)
