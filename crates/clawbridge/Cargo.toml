@@ -11,3 +11,4 @@ serde_json = "1.0"
 tokio = { version = "1.45", features = ["macros", "rt-multi-thread", "process", "io-util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1.12", features = ["v5"] }

@@ -3,6 +3,14 @@ name = "clawlink"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [
+	".",
+	"crates/clawbridge",
+	"crates/clawops",
+	"crates/clawrun",
+]
+
 [dependencies]
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws", "http1", "json"] }

@@ -160,6 +160,10 @@ The integration test `tests/echo_ws.rs` validates:
 - macOS launchd plist: `deploy/launchd/com.clawlink.gateway.plist`
 - Tailscale hardening notes: `deploy/tailscale.md`
 
+## Related Docs
+
+- Session and worker pool behavior: `docs/session-worker-pool-flow.md`
+
 ### GitHub Actions -> Railway
 
 This repository includes a deploy workflow at `.github/workflows/railway-deploy.yml`.
