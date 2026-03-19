@@ -34,7 +34,7 @@ ws_enabled = true
 ws_intents = 1107300352
 ws_reconnect_seconds = 3
 auto_reply_when_no_operator = false
-auto_reply_text = "测试链路已通：当前没有 operator 在线，暂时由网关自动回复。"
+auto_reply_text = "欢迎使用 clawlink"
 endpoint = ""
 
 [channels.wecom]

@@ -301,7 +301,7 @@ fn default_qq_reconnect_seconds() -> u64 {
 }
 
 fn default_qq_auto_reply_text() -> String {
-    "测试链路已通：当前没有 operator 在线，暂时由网关自动回复。".to_string()
+    "欢迎使用 clawlink".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
