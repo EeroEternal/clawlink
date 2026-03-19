@@ -1,0 +1,29 @@
+[gateway]
+url = "ws://127.0.0.1:9443/gateway/ws"
+token = "REPLACE_WITH_THE_SAME_64_PLUS_CHAR_TOKEN_AS_CLAWLINK"
+
+[operator]
+device_id = "clawops-main"
+reconnect_secs = 3
+ping_interval_secs = 20
+
+[logging]
+level = "info"
+
+[clawrun.copilot]
+endpoint = "http://127.0.0.1:8787/v1/respond"
+timeout_secs = 30
+# bearer_token = "optional-bridge-token"
+# system_prompt = "You are an assistant for IM support."
+
+[[agents]]
+name = "default"
+engine = "template"
+reply_template = "[{agent}] 收到: {text}"
+
+[[agents]]
+name = "github-copilot-sdk"
+engine = "copilot_sdk"
+channels = ["qq", "feishu", "wecom"]
+keywords = ["退款", "订单", "invoice", "refund"]
+reply_template = "[{agent}] 你的问题已进入支持流程: {text}"
