@@ -62,6 +62,12 @@ impl AppConfig {
                 "CLAWLINK_QQ_WS_RECONNECT_SECONDS",
                 default_qq_reconnect_seconds(),
             ),
+            auto_reply_when_no_operator: env_bool(
+                "CLAWLINK_QQ_AUTO_REPLY_WHEN_NO_OPERATOR",
+                false,
+            ),
+            auto_reply_text: env::var("CLAWLINK_QQ_AUTO_REPLY_TEXT")
+                .unwrap_or_else(|_| default_qq_auto_reply_text()),
             endpoint: env::var("CLAWLINK_QQ_ENDPOINT").ok(),
         };
 
@@ -249,6 +255,10 @@ pub struct QqChannelConfig {
     #[serde(default = "default_qq_reconnect_seconds")]
     pub ws_reconnect_seconds: u64,
     #[serde(default)]
+    pub auto_reply_when_no_operator: bool,
+    #[serde(default = "default_qq_auto_reply_text")]
+    pub auto_reply_text: String,
+    #[serde(default)]
     pub endpoint: Option<String>,
 }
 
@@ -265,6 +275,8 @@ impl Default for QqChannelConfig {
             ws_enabled: true,
             ws_intents: default_qq_ws_intents(),
             ws_reconnect_seconds: default_qq_reconnect_seconds(),
+            auto_reply_when_no_operator: false,
+            auto_reply_text: default_qq_auto_reply_text(),
             endpoint: None,
         }
     }
@@ -286,6 +298,10 @@ fn default_qq_ws_intents() -> u64 {
 
 fn default_qq_reconnect_seconds() -> u64 {
     3
+}
+
+fn default_qq_auto_reply_text() -> String {
+    "测试链路已通：当前没有 operator 在线，暂时由网关自动回复。".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

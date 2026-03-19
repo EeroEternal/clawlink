@@ -30,9 +30,11 @@ api_base = "https://api.sgroup.qq.com"
 # Optional override. Leave empty to auto-discover from /gateway/bot.
 # gateway_url = "wss://api.sgroup.qq.com/websocket"
 ws_enabled = true
-# GROUP_AND_C2C_EVENT
-ws_intents = 1073741824
+# FULL_INTENTS (channel + direct_message + group_and_c2c)
+ws_intents = 1107300352
 ws_reconnect_seconds = 3
+auto_reply_when_no_operator = false
+auto_reply_text = "测试链路已通：当前没有 operator 在线，暂时由网关自动回复。"
 endpoint = ""
 
 [channels.wecom]

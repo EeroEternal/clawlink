@@ -285,6 +285,17 @@ async fn run_gateway_once(
                             if let Some(event) = parse_dispatch_event(&gateway) {
                                 if events.send(event).is_err() {
                                     warn!("qq inbound event dropped: no operator connected");
+                                    if cfg.auto_reply_when_no_operator {
+                                        if let Some(fallback) = build_no_operator_reply(&gateway, &cfg.auto_reply_text)
+                                        {
+                                            let channel = QqChannel::new(cfg.clone());
+                                            if let Err(err) = channel.send(&fallback).await {
+                                                warn!(error = %err, "qq auto-reply failed");
+                                            } else {
+                                                info!("qq auto-reply sent (no operator)");
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -477,6 +488,41 @@ fn parse_dispatch_event(frame: &GatewayFrame) -> Option<ServerMessage> {
         media: Vec::new(),
         quote: msg_id,
         at,
+    })
+}
+
+fn build_no_operator_reply(frame: &GatewayFrame, text: &str) -> Option<OutboundMessage> {
+    let data = frame.d.as_ref()?;
+    let quote = data
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(ToOwned::to_owned);
+
+    let session_id = if let Some(group_openid) = data
+        .get("group_openid")
+        .and_then(|v| v.as_str())
+        .map(ToOwned::to_owned)
+    {
+        format!("qq:group:{group_openid}")
+    } else if let Some(user_openid) = data
+        .get("author")
+        .and_then(|v| v.get("id"))
+        .and_then(|v| v.as_str())
+        .map(ToOwned::to_owned)
+    {
+        format!("qq:private:{user_openid}")
+    } else {
+        return None;
+    };
+
+    Some(OutboundMessage {
+        session_id: session_id.clone(),
+        channel_id: session_id,
+        text: Some(text.to_string()),
+        media: Vec::new(),
+        quote,
+        at: Vec::new(),
+        revoke: false,
     })
 }
 
