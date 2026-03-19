@@ -64,7 +64,7 @@ impl QqChannel {
         }
 
         let token = self.get_app_access_token().await?;
-        Ok(format!("Bearer {token}"))
+        Ok(format!("QQBot {token}"))
     }
 
     async fn get_app_access_token(&self) -> Result<String> {
