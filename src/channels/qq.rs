@@ -283,7 +283,9 @@ async fn run_gateway_once(
 
                         if gateway.op == 0 {
                             if let Some(event) = parse_dispatch_event(&gateway) {
-                                let _ = events.send(event);
+                                if events.send(event).is_err() {
+                                    warn!("qq inbound event dropped: no operator connected");
+                                }
                             }
                         }
                     }
