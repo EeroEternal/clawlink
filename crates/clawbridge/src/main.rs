@@ -17,6 +17,7 @@ use axum::{
 };
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::sync::{Mutex, mpsc, oneshot};
@@ -50,6 +51,12 @@ struct Cli {
     cmd: Option<String>,
     #[arg(long, env = "CLAWBRIDGE_CMD_ARG")]
     cmd_arg: Vec<String>,
+    #[arg(long, env = "CLAWBRIDGE_CMD_PROTOCOL", default_value = "raw-text")]
+    cmd_protocol: String,
+    #[arg(long, env = "CLAWBRIDGE_CMD_MAX_RETRIES", default_value_t = 1)]
+    cmd_max_retries: u32,
+    #[arg(long, env = "CLAWBRIDGE_CMD_RETRY_BACKOFF_MS", default_value_t = 300)]
+    cmd_retry_backoff_ms: u64,
     #[arg(long, env = "CLAWBRIDGE_LOG_LEVEL", default_value = "info")]
     log_level: String,
 }
@@ -70,7 +77,20 @@ enum Provider {
         request_timeout: Duration,
     },
     Mock,
-    Command { bin: PathBuf, args: Vec<String> },
+    Command {
+        bin: PathBuf,
+        args: Vec<String>,
+        protocol: CommandProtocol,
+        request_timeout: Duration,
+        max_retries: u32,
+        retry_backoff: Duration,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandProtocol {
+    RawText,
+    ZeneHostV1,
 }
 
 #[derive(Debug, Clone)]
@@ -190,9 +210,14 @@ fn build_provider(cli: &Cli) -> Result<Provider, String> {
             let Some(bin) = &cli.cmd else {
                 return Err("CLAWBRIDGE_CMD is required when provider=command".to_string());
             };
+            let protocol = parse_command_protocol(&cli.cmd_protocol)?;
             Ok(Provider::Command {
                 bin: PathBuf::from(bin),
                 args: cli.cmd_arg.clone(),
+                protocol,
+                request_timeout,
+                max_retries: cli.cmd_max_retries,
+                retry_backoff: Duration::from_millis(cli.cmd_retry_backoff_ms.max(1)),
             })
         }
         other => Err(format!(
@@ -233,7 +258,35 @@ async fn run_provider(provider: &Provider, req: &BridgeRequest) -> Result<String
                 .await
         }
         Provider::Mock => Ok(format!("[{}] {}", req.agent, req.prompt)),
-        Provider::Command { bin, args } => run_command_provider(bin, args, req).await,
+        Provider::Command {
+            bin,
+            args,
+            protocol,
+            request_timeout,
+            max_retries,
+            retry_backoff,
+        } => {
+            run_command_provider(
+                bin,
+                args,
+                *protocol,
+                *request_timeout,
+                *max_retries,
+                *retry_backoff,
+                req,
+            )
+            .await
+        }
+    }
+}
+
+fn parse_command_protocol(raw: &str) -> Result<CommandProtocol, String> {
+    match raw {
+        "raw-text" => Ok(CommandProtocol::RawText),
+        "zene-host-v1" => Ok(CommandProtocol::ZeneHostV1),
+        other => Err(format!(
+            "unsupported command protocol '{other}', use raw-text or zene-host-v1"
+        )),
     }
 }
 
@@ -387,7 +440,45 @@ impl CopilotCliPool {
     }
 }
 
-async fn run_command_provider(bin: &PathBuf, args: &[String], req: &BridgeRequest) -> Result<String, String> {
+async fn run_command_provider(
+    bin: &PathBuf,
+    args: &[String],
+    protocol: CommandProtocol,
+    request_timeout: Duration,
+    max_retries: u32,
+    retry_backoff: Duration,
+    req: &BridgeRequest,
+) -> Result<String, String> {
+    let mut attempt: u32 = 0;
+
+    loop {
+        let result = run_command_provider_once(bin, args, protocol, request_timeout, req).await;
+        match result {
+            Ok(text) => return Ok(text),
+            Err(err) => {
+                if attempt >= max_retries || !is_retryable_command_error(protocol, &err) {
+                    return Err(err);
+                }
+
+                attempt += 1;
+                let mut delay = retry_backoff;
+                if attempt > 1 {
+                    let shift = (attempt - 1).min(8);
+                    delay = retry_backoff.saturating_mul(1u32 << shift);
+                }
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
+}
+
+async fn run_command_provider_once(
+    bin: &PathBuf,
+    args: &[String],
+    protocol: CommandProtocol,
+    request_timeout: Duration,
+    req: &BridgeRequest,
+) -> Result<String, String> {
     let mut cmd = Command::new(bin);
     cmd.args(args)
         .stdin(Stdio::piped())
@@ -398,8 +489,7 @@ async fn run_command_provider(bin: &PathBuf, args: &[String], req: &BridgeReques
         .spawn()
         .map_err(|e| format!("failed to spawn command provider: {e}"))?;
 
-    let payload = serde_json::to_vec(req)
-        .map_err(|e| format!("failed to encode bridge request payload: {e}"))?;
+    let payload = encode_command_request(protocol, request_timeout, req)?;
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
@@ -408,9 +498,9 @@ async fn run_command_provider(bin: &PathBuf, args: &[String], req: &BridgeReques
             .map_err(|e| format!("failed to write provider stdin: {e}"))?;
     }
 
-    let output = child
-        .wait_with_output()
+    let output = tokio::time::timeout(request_timeout, child.wait_with_output())
         .await
+        .map_err(|_| format!("command provider timed out after {}s", request_timeout.as_secs()))?
         .map_err(|e| format!("failed waiting provider output: {e}"))?;
 
     if !output.status.success() {
@@ -425,12 +515,134 @@ async fn run_command_provider(bin: &PathBuf, args: &[String], req: &BridgeReques
     let stdout = String::from_utf8(output.stdout)
         .map_err(|e| format!("provider stdout is not utf-8: {e}"))?;
 
-    let text = stdout.trim().to_string();
-    if text.is_empty() {
-        return Err("provider returned empty response".to_string());
+    decode_command_response(protocol, &stdout)
+}
+
+fn is_retryable_command_error(protocol: CommandProtocol, err: &str) -> bool {
+    if protocol != CommandProtocol::ZeneHostV1 {
+        return false;
     }
 
-    Ok(text)
+    err.contains("placeholder text")
+        || err.contains("suspicious success")
+        || err.contains("zene host error TIMEOUT")
+        || err.contains("timed out")
+}
+
+fn encode_command_request(
+    protocol: CommandProtocol,
+    request_timeout: Duration,
+    req: &BridgeRequest,
+) -> Result<Vec<u8>, String> {
+    match protocol {
+        CommandProtocol::RawText => {
+            serde_json::to_vec(req).map_err(|e| format!("failed to encode bridge request payload: {e}"))
+        }
+        CommandProtocol::ZeneHostV1 => {
+            let mut prompt = req.prompt.clone();
+            if let Some(system_prompt) = &req.system_prompt {
+                let system_prompt = system_prompt.trim();
+                if !system_prompt.is_empty() {
+                    prompt = format!("System instruction:\n{system_prompt}\n\nUser message:\n{}", req.prompt);
+                }
+            }
+
+            let id_key = format!("{}|{}|{}", req.session_id, req.channel_id, req.prompt);
+            let idempotency_key = Uuid::new_v5(&Uuid::NAMESPACE_URL, id_key.as_bytes()).to_string();
+            let request_id = Uuid::new_v4().to_string();
+
+            let timeout_ms = (request_timeout.as_millis() as u64).saturating_mul(9) / 10;
+            let payload = json!({
+                "protocol_version": 1,
+                "type": "run",
+                "request_id": request_id,
+                "session_id": req.session_id,
+                "channel_id": req.channel_id,
+                "agent": req.agent,
+                "prompt": prompt,
+                "timeout_ms": timeout_ms.max(1000),
+                "idempotency_key": idempotency_key,
+            });
+
+            let mut encoded = serde_json::to_vec(&payload)
+                .map_err(|e| format!("failed to encode zene host request payload: {e}"))?;
+            encoded.push(b'\n');
+            Ok(encoded)
+        }
+    }
+}
+
+fn decode_command_response(protocol: CommandProtocol, stdout: &str) -> Result<String, String> {
+    match protocol {
+        CommandProtocol::RawText => {
+            let text = stdout.trim().to_string();
+            if text.is_empty() {
+                return Err("provider returned empty response".to_string());
+            }
+            Ok(text)
+        }
+        CommandProtocol::ZeneHostV1 => {
+            let line = stdout
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .ok_or_else(|| "zene host returned empty response".to_string())?;
+
+            let payload: ZeneBridgeResponse = serde_json::from_str(line)
+                .map_err(|e| format!("failed to decode zene host response: {e}; raw={line}"))?;
+
+            if payload.ok {
+                let text = payload.text.trim();
+                if text.is_empty() {
+                    return Err("zene host returned empty text".to_string());
+                }
+
+                // Guard against known zene placeholder responses that are not model output.
+                if looks_like_zene_placeholder(text) {
+                    return Err("zene host returned placeholder text".to_string());
+                }
+
+                // A successful response with zero/absent token accounting is usually a
+                // non-LLM fallback path; treat it as an error so upstream can fallback.
+                if payload
+                    .usage
+                    .as_ref()
+                    .map(|u| u.total_tokens.unwrap_or(0) == 0)
+                    .unwrap_or(true)
+                {
+                    return Err("zene host returned suspicious success response".to_string());
+                }
+
+                Ok(payload.text)
+            } else {
+                let code = payload.error_code.unwrap_or_else(|| "INTERNAL".to_string());
+                let message = payload
+                    .error_message
+                    .unwrap_or_else(|| "zene host returned an error".to_string());
+                Err(format!("zene host error {code}: {message}"))
+            }
+        }
+    }
+}
+
+fn looks_like_zene_placeholder(text: &str) -> bool {
+    let normalized = text.trim().to_ascii_lowercase();
+    normalized == "plan completed (or explicit empty plan)."
+        || normalized == "plan completed."
+        || normalized == "no changes were made."
+}
+
+#[derive(Debug, Deserialize)]
+struct ZeneBridgeResponse {
+    ok: bool,
+    text: String,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    usage: Option<ZeneBridgeUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ZeneBridgeUsage {
+    total_tokens: Option<u64>,
 }
 
 #[cfg(test)]
@@ -464,5 +676,74 @@ mod tests {
         let s1 = map_to_copilot_session_id(&req);
         let s2 = map_to_copilot_session_id(&req);
         assert_eq!(s1, s2);
+    }
+
+    #[test]
+    fn zene_host_decode_success_response() {
+        let raw = r#"{"ok":true,"request_id":"r1","session_id":"s1","text":"hello","error_code":null,"error_message":null,"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
+        let text = decode_command_response(CommandProtocol::ZeneHostV1, raw).unwrap();
+        assert_eq!(text, "hello");
+    }
+
+    #[test]
+    fn zene_host_decode_placeholder_response() {
+        let raw = r#"{"ok":true,"request_id":"r1","session_id":"s1","text":"Plan completed (or explicit empty plan).","error_code":null,"error_message":null,"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
+        let err = decode_command_response(CommandProtocol::ZeneHostV1, raw).unwrap_err();
+        assert!(err.contains("placeholder"));
+    }
+
+    #[test]
+    fn zene_host_decode_suspicious_zero_tokens_success() {
+        let raw = r#"{"ok":true,"request_id":"r1","session_id":"s1","text":"hello","error_code":null,"error_message":null,"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}"#;
+        let err = decode_command_response(CommandProtocol::ZeneHostV1, raw).unwrap_err();
+        assert!(err.contains("suspicious success"));
+    }
+
+    #[test]
+    fn zene_host_decode_error_response() {
+        let raw = r#"{"ok":false,"request_id":"r1","session_id":"s1","text":"","error_code":"TIMEOUT","error_message":"request exceeded timeout_ms","usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}"#;
+        let err = decode_command_response(CommandProtocol::ZeneHostV1, raw).unwrap_err();
+        assert!(err.contains("TIMEOUT"));
+    }
+
+    #[test]
+    fn zene_host_encode_contains_protocol_fields() {
+        let req = BridgeRequest {
+            agent: "github-copilot-sdk".to_string(),
+            prompt: "hello".to_string(),
+            channel_id: "qq".to_string(),
+            session_id: "qq:private:u1".to_string(),
+            system_prompt: None,
+        };
+
+        let payload = encode_command_request(
+            CommandProtocol::ZeneHostV1,
+            Duration::from_secs(30),
+            &req,
+        )
+        .unwrap();
+
+        let value: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(value["protocol_version"], 1);
+        assert_eq!(value["type"], "run");
+        assert_eq!(value["session_id"], req.session_id);
+        assert_eq!(value["prompt"], req.prompt);
+        assert!(value["idempotency_key"].as_str().is_some());
+    }
+
+    #[test]
+    fn retryable_error_filter_for_zene_host() {
+        assert!(is_retryable_command_error(
+            CommandProtocol::ZeneHostV1,
+            "zene host returned placeholder text"
+        ));
+        assert!(is_retryable_command_error(
+            CommandProtocol::ZeneHostV1,
+            "zene host error TIMEOUT: request exceeded timeout_ms"
+        ));
+        assert!(!is_retryable_command_error(
+            CommandProtocol::RawText,
+            "provider returned empty response"
+        ));
     }
 }
