@@ -13,6 +13,56 @@ pub struct AppConfig {
     pub channels: ChannelsConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub bridge: Option<BridgeConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct BridgeConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_bridge_bind")]
+    pub bind: String,
+    #[serde(default = "default_bridge_provider")]
+    pub provider: String,
+    #[serde(default = "default_copilot_bin")]
+    pub copilot_bin: String,
+    #[serde(default)]
+    pub copilot_model: Option<String>,
+    #[serde(default)]
+    pub copilot_config_dir: std::path::PathBuf,
+    #[serde(default = "default_true")]
+    pub session_mode: bool,
+    #[serde(default = "default_pool_size")]
+    pub copilot_pool_size: usize,
+    #[serde(default = "default_worker_queue")]
+    pub copilot_worker_queue: usize,
+    #[serde(default = "default_timeout_secs")]
+    pub request_timeout_secs: u64,
+}
+
+fn default_bridge_bind() -> String {
+    "127.0.0.1:8787".to_string()
+}
+
+fn default_bridge_provider() -> String {
+    "copilot_cli_pool".to_string()
+}
+
+fn default_copilot_bin() -> String {
+    "copilot".to_string()
+}
+
+fn default_pool_size() -> usize {
+    2
+}
+
+fn default_worker_queue() -> usize {
+    64
+}
+
+fn default_timeout_secs() -> u64 {
+    180
 }
 
 impl AppConfig {
@@ -46,6 +96,24 @@ impl AppConfig {
         let require_wss = env_bool("CLAWLINK_GATEWAY_REQUIRE_WSS", false);
         let allow_public_bind = env_bool("CLAWLINK_ALLOW_PUBLIC_BIND", true);
         let logging_level = env::var("CLAWLINK_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
+
+        let bridge_enabled = env_bool("CLAWBRIDGE_ENABLED", false);
+        let bridge_cfg = if bridge_enabled {
+            Some(BridgeConfig {
+                enabled: true,
+                bind: env::var("CLAWBRIDGE_BIND").unwrap_or_else(|_| default_bridge_bind()),
+                provider: env::var("CLAWBRIDGE_PROVIDER").unwrap_or_else(|_| default_bridge_provider()),
+                copilot_bin: env::var("CLAWBRIDGE_COPILOT_BIN").unwrap_or_else(|_| default_copilot_bin()),
+                copilot_model: env::var("CLAWBRIDGE_COPILOT_MODEL").ok(),
+                copilot_config_dir: env::var("CLAWBRIDGE_COPILOT_CONFIG_DIR").map(std::path::PathBuf::from).unwrap_or_default(),
+                session_mode: env_bool("CLAWBRIDGE_SESSION_MODE", true),
+                copilot_pool_size: env_usize("CLAWBRIDGE_COPILOT_POOL_SIZE", default_pool_size()),
+                copilot_worker_queue: env_usize("CLAWBRIDGE_COPILOT_WORKER_QUEUE", default_worker_queue()),
+                request_timeout_secs: env_u64("CLAWBRIDGE_REQUEST_TIMEOUT_SECS", default_timeout_secs()),
+            })
+        } else {
+            None
+        };
 
         let qq_enabled = env_bool("CLAWLINK_CHANNEL_QQ_ENABLED", false);
         let qq_cfg = QqChannelConfig {
@@ -105,6 +173,7 @@ impl AppConfig {
             logging: LoggingConfig {
                 level: logging_level,
             },
+            bridge: bridge_cfg,
         })
     }
 
